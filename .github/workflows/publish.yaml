@@ -4,18 +4,29 @@ on:
   push:
     branches:
       - 'release/v*.*.*'
+    tags:
+      - 'v*.*.*'
+  release:
+    types: [published]
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - name: Get updated version name and version code
         run: |
-          # Extract version name from branch (removing 'bump/v' prefix)
-          version_name=${GITHUB_REF#refs/heads/release/v}
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            version_name=${GITHUB_REF#refs/tags/v}
+          elif [[ $GITHUB_REF == refs/heads/release/v* ]]; then
+            version_name=${GITHUB_REF#refs/heads/release/v}
+          else
+            version_name=$(echo "$GITHUB_REF" | sed -e 's|.*/v||')
+          fi
 
           # Store values as environment variables
           echo "VERSION_NAME=$version_name" >> $GITHUB_ENV
@@ -69,14 +80,14 @@ jobs:
           mv app/build/outputs/apk/release/app-x86-release.apk app/build/outputs/apk/release/nextplayer-v${{ env.VERSION_NAME }}-x86.apk
           mv app/build/outputs/apk/release/app-x86_64-release.apk app/build/outputs/apk/release/nextplayer-v${{ env.VERSION_NAME }}-x86_64.apk
 
-      - name: Create Draft Release
-        id: create_draft_release
+      - name: Create or Update Release
+        id: create_or_update_release
         uses: softprops/action-gh-release@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           files: app/build/outputs/apk/release/nextplayer*
-          draft: true
+          draft: ${{ github.event_name != 'release' }}
           name: v${{ env.VERSION_NAME }}
           generate_release_notes: true
           tag_name: v${{ env.VERSION_NAME }}
