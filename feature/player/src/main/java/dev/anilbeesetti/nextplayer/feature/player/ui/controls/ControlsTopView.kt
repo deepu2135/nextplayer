@@ -36,6 +36,7 @@ fun ControlsTopView(
     onChaptersClick: () -> Unit = {},
     onAudioClick: () -> Unit = {},
     onSubtitleClick: () -> Unit = {},
+    onSubtitleLongClick: (() -> Unit)? = null,
     onPlaybackSpeedClick: () -> Unit = {},
     onPlaylistClick: () -> Unit = {},
     onBackClick: () -> Unit,
@@ -97,7 +98,10 @@ fun ControlsTopView(
                     contentDescription = null,
                 )
             }
-            PlayerButton(onClick = onSubtitleClick) {
+            PlayerButton(
+                onClick = onSubtitleClick,
+                onLongClick = onSubtitleLongClick
+            ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_subtitle_track),
                     contentDescription = null,
