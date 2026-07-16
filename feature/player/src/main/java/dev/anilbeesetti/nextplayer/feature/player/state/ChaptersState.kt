@@ -64,10 +64,10 @@ class ChaptersState(private val player: Player) {
                                 endTimeMs = entry.endTimeMs.toLong()
                             )
                         )
-                    } else if (entry is androidx.media3.extractor.metadata.Chapter) {
+                    } else if (entry is androidx.media3.common.Chapter) {
                         extractedChapters.add(
                             Chapter(
-                                title = entry.title ?: "Chapter ${extractedChapters.size + 1}",
+                                title = entry.title?.toString() ?: "Chapter ${extractedChapters.size + 1}",
                                 startTimeMs = entry.startTimeMs,
                                 endTimeMs = entry.endTimeMs
                             )
