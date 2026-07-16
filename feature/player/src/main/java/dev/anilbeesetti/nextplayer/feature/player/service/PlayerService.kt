@@ -725,8 +725,9 @@ class PlayerService : MediaSessionService() {
         val subtitleDelay = mediaItem.mediaMetadata.subtitleDelayMilliseconds ?: videoState?.subtitleDelayMilliseconds
         val subtitleSpeed = mediaItem.mediaMetadata.subtitleSpeed ?: videoState?.subtitleSpeed
 
-        val path = videoState?.path ?: getPath(uri)
-        val mkvChapters = if (uri.toString().endsWith(".mkv", ignoreCase = true) || (path != null && path.endsWith(".mkv", ignoreCase = true))) {
+        val scheme = uri.scheme
+        val isLocal = scheme == ContentResolver.SCHEME_FILE || scheme == ContentResolver.SCHEME_CONTENT
+        val mkvChapters = if (isLocal) {
             runCatching {
                 contentResolver.openInputStream(uri)?.use { inputStream ->
                     MkvChaptersParser().parse(inputStream)
@@ -752,9 +753,16 @@ class PlayerService : MediaSessionService() {
                     val extras = build().extras ?: Bundle()
                     val updatedExtras = Bundle(extras).apply {
                         if (mkvChapters != null && mkvChapters.isNotEmpty()) {
-                            putLongArray("nextplayer_chapter_starts", mkvChapters.map { it.startTimeMs }.toLongArray())
-                            putLongArray("nextplayer_chapter_ends", mkvChapters.map { it.startTimeMs + 1000 }.toLongArray())
-                            putStringArray("nextplayer_chapter_titles", mkvChapters.map { it.title }.toTypedArray())
+                            val sortedChapters = mkvChapters.sortedBy { it.startTimeMs }
+                            val starts = sortedChapters.map { it.startTimeMs }.toLongArray()
+                            val ends = LongArray(starts.size)
+                            for (i in 0 until starts.size - 1) {
+                                ends[i] = starts[i + 1]
+                            }
+                            ends[starts.size - 1] = 0L // Will be handled in ChaptersState to use video duration
+                            putLongArray("nextplayer_chapter_starts", starts)
+                            putLongArray("nextplayer_chapter_ends", ends)
+                            putStringArray("nextplayer_chapter_titles", sortedChapters.map { it.title }.toTypedArray())
                         }
                     }
                     setExtras(updatedExtras)
@@ -885,6 +893,15 @@ private class MkvChaptersParser {
             }
             val data = if (totalRead < buffer.size) buffer.copyOfRange(0, totalRead) else buffer
 
+            // Verify EBML Header magic bytes: 0x1A 0x45 0xDF 0xA3
+            if (data.size < 4 || 
+                data[0] != 0x1A.toByte() || 
+                data[1] != 0x45.toByte() || 
+                data[2] != 0xDF.toByte() || 
+                data[3] != 0xA3.toByte()) {
+                return emptyList()
+            }
+
             var pos = 0
             
             fun readVint(): Long? {
@@ -916,34 +933,45 @@ private class MkvChaptersParser {
                 return value
             }
 
-            var chaptersPos = -1
+            val chaptersIndices = mutableListOf<Int>()
             for (i in 0 until data.size - 1) {
                 if ((data[i].toInt() and 0xFF) == 0x45 && (data[i + 1].toInt() and 0xFF) == 0xB9) {
-                    chaptersPos = i
-                    break
+                    chaptersIndices.add(i)
                 }
             }
 
-            if (chaptersPos != -1) {
-                pos = chaptersPos
+            for (startPos in chaptersIndices) {
+                pos = startPos
                 val chaptersId = readVintWithMarker()
                 if (chaptersId == 0x45B9L) {
-                    val chaptersSize = readVint() ?: return emptyList()
+                    val chaptersSize = readVint() ?: continue
+                    if (chaptersSize <= 0 || pos + chaptersSize > data.size) continue
                     val chaptersEnd = pos + chaptersSize.toInt()
 
+                    val parsedChapters = mutableListOf<RawChapter>()
+                    var success = true
+
                     while (pos < chaptersEnd && pos < data.size) {
-                        val id = readVintWithMarker() ?: break
-                        val size = readVint() ?: break
+                        val id = readVintWithMarker() ?: { success = false; break }()
+                        val size = readVint() ?: { success = false; break }()
+                        if (size < 0 || pos + size > data.size) {
+                            success = false
+                            break
+                        }
                         val end = pos + size.toInt()
 
                         if (id == 0x45B9L || id == 0x45BDL) {
                             // EditionEntry
                         } else if (id == 0xB6L) {
-                            var startTimeNs = 0L
+                            var startTimeNs = -1L
                             var title = ""
                             while (pos < end && pos < data.size) {
                                 val subId = readVintWithMarker() ?: break
                                 val subSize = readVint() ?: break
+                                if (subSize < 0 || pos + subSize > data.size) {
+                                    success = false
+                                    break
+                                }
                                 val subEnd = pos + subSize.toInt()
 
                                 if (subId == 0x91L) {
@@ -959,6 +987,10 @@ private class MkvChaptersParser {
                                     while (pos < subEnd && pos < data.size) {
                                         val dispId = readVintWithMarker() ?: break
                                         val dispSize = readVint() ?: break
+                                        if (dispSize < 0 || pos + dispSize > data.size) {
+                                            success = false
+                                            break
+                                        }
                                         val dispEnd = pos + dispSize.toInt()
                                         if (dispId == 0x85L) {
                                             val copyLen = dispSize.toInt().coerceAtMost(data.size - pos)
@@ -975,10 +1007,16 @@ private class MkvChaptersParser {
                                     pos += subSize.toInt()
                                 }
                             }
-                            chapters.add(RawChapter(title, startTimeNs / 1000000))
+                            if (startTimeNs >= 0) {
+                                parsedChapters.add(RawChapter(title, startTimeNs / 1000000))
+                            }
                         } else {
                             pos += size.toInt()
                         }
+                    }
+                    if (success && parsedChapters.isNotEmpty()) {
+                        chapters.addAll(parsedChapters)
+                        break
                     }
                 }
             }

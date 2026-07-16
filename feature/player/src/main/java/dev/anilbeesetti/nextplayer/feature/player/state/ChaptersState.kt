@@ -21,7 +21,7 @@ import kotlinx.coroutines.awaitCancellation
 @OptIn(UnstableApi::class)
 @Composable
 fun rememberChaptersState(player: Player): ChaptersState {
-    val chaptersState = remember { ChaptersState(player) }
+    val chaptersState = remember(player) { ChaptersState(player) }
     LaunchedEffect(player) { chaptersState.observe() }
     return chaptersState
 }
@@ -73,13 +73,21 @@ class ChaptersState(private val player: Player) {
             val starts = extras.getLongArray("nextplayer_chapter_starts") ?: longArrayOf()
             val ends = extras.getLongArray("nextplayer_chapter_ends") ?: longArrayOf()
             val titles = extras.getStringArray("nextplayer_chapter_titles") ?: arrayOf()
+            val duration = player.duration.takeIf { it > 0 } ?: 0L
             for (i in starts.indices) {
                 if (i < titles.size) {
+                    val end = if (i < ends.size && ends[i] > starts[i]) {
+                        ends[i]
+                    } else if (i == starts.size - 1 && duration > starts[i]) {
+                        duration
+                    } else {
+                        starts[i] + 1000
+                    }
                     extractedChapters.add(
                         Chapter(
                             title = titles[i],
                             startTimeMs = starts[i],
-                            endTimeMs = if (i < ends.size) ends[i] else (starts[i] + 1000)
+                            endTimeMs = end
                         )
                     )
                 }
