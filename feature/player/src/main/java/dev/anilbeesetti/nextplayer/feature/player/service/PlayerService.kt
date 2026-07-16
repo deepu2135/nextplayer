@@ -365,7 +365,25 @@ class PlayerService : MediaSessionService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = serviceScope.future(Dispatchers.IO) {
-            val updatedMediaItems = updatedMediaItemsWithMetadata(mediaItems)
+            val updatedMediaItems = mediaItems.toMutableList()
+            if (startIndex in updatedMediaItems.indices) {
+                updatedMediaItems[startIndex] = updatedMediaItemWithMetadata(updatedMediaItems[startIndex])
+            }
+
+            val player = mediaSession.player
+            serviceScope.launch(Dispatchers.IO) {
+                for (i in updatedMediaItems.indices) {
+                    if (i != startIndex) {
+                        val resolvedItem = updatedMediaItemWithMetadata(mediaItems[i])
+                        withContext(Dispatchers.Main) {
+                            if (player.mediaItemCount > i && player.getMediaItemAt(i).mediaId == resolvedItem.mediaId) {
+                                player.replaceMediaItem(i, resolvedItem)
+                            }
+                        }
+                    }
+                }
+            }
+
             return@future MediaSession.MediaItemsWithStartPosition(updatedMediaItems, startIndex, startPositionMs)
         }
 
@@ -374,8 +392,23 @@ class PlayerService : MediaSessionService() {
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> = serviceScope.future(Dispatchers.IO) {
-            val updatedMediaItems = updatedMediaItemsWithMetadata(mediaItems)
-            return@future updatedMediaItems.toMutableList()
+            val originalItems = mediaItems.toMutableList()
+            val player = mediaSession.player
+            val originalCount = player.mediaItemCount
+
+            serviceScope.launch(Dispatchers.IO) {
+                for (i in originalItems.indices) {
+                    val resolvedItem = updatedMediaItemWithMetadata(originalItems[i])
+                    withContext(Dispatchers.Main) {
+                        val targetIndex = originalCount + i
+                        if (player.mediaItemCount > targetIndex && player.getMediaItemAt(targetIndex).mediaId == resolvedItem.mediaId) {
+                            player.replaceMediaItem(targetIndex, resolvedItem)
+                        }
+                    }
+                }
+            }
+
+            return@future originalItems
         }
 
         override fun onCustomCommand(
@@ -627,61 +660,67 @@ class PlayerService : MediaSessionService() {
         serviceScope.cancel()
     }
 
+    private suspend fun updatedMediaItemWithMetadata(
+        mediaItem: MediaItem,
+    ): MediaItem {
+        val uri = mediaItem.mediaId.toUri()
+        val video = mediaRepository.getVideoByUri(uri = mediaItem.mediaId)
+        val videoState = mediaRepository.getVideoState(uri = mediaItem.mediaId)
+
+        val externalSubs = videoState?.externalSubs ?: emptyList()
+        val localSubs = (videoState?.path ?: getPath(uri))?.let {
+            File(it).getLocalSubtitles(
+                context = this@PlayerService,
+                excludeSubsList = externalSubs,
+            )
+        } ?: emptyList()
+
+        val existingSubConfigurations = mediaItem.localConfiguration?.subtitleConfigurations ?: emptyList()
+        val subConfigurations = (localSubs + externalSubs).map { subtitleUri ->
+            uriToSubtitleConfiguration(
+                uri = subtitleUri,
+                subtitleEncoding = playerPreferences.subtitleTextEncoding,
+            )
+        }
+
+        // Use placeholder artwork initially - actual artwork will be loaded in background
+        val artworkUri = getDefaultArtworkUri()
+
+        val title = mediaItem.mediaMetadata.title ?: video?.nameWithExtension ?: getFilenameFromUri(uri)
+        val positionMs = mediaItem.mediaMetadata.positionMs ?: videoState?.position
+        val videoScale = mediaItem.mediaMetadata.videoZoom ?: videoState?.videoScale
+        val playbackSpeed = mediaItem.mediaMetadata.playbackSpeed ?: videoState?.playbackSpeed
+        val audioTrackIndex = mediaItem.mediaMetadata.audioTrackIndex ?: videoState?.audioTrackIndex
+        val subtitleTrackIndex = mediaItem.mediaMetadata.subtitleTrackIndex ?: videoState?.subtitleTrackIndex
+        val subtitleDelay = mediaItem.mediaMetadata.subtitleDelayMilliseconds ?: videoState?.subtitleDelayMilliseconds
+        val subtitleSpeed = mediaItem.mediaMetadata.subtitleSpeed ?: videoState?.subtitleSpeed
+
+        return mediaItem.buildUpon().apply {
+            setSubtitleConfigurations(existingSubConfigurations + subConfigurations)
+            setMediaMetadata(
+                MediaMetadata.Builder().apply {
+                    setTitle(title)
+                    setArtworkUri(artworkUri)
+                    setExtras(
+                        positionMs = positionMs,
+                        videoScale = videoScale,
+                        playbackSpeed = playbackSpeed,
+                        audioTrackIndex = audioTrackIndex,
+                        subtitleTrackIndex = subtitleTrackIndex,
+                        subtitleDelayMilliseconds = subtitleDelay,
+                        subtitleSpeed = subtitleSpeed,
+                    )
+                }.build(),
+            )
+        }.build()
+    }
+
     private suspend fun updatedMediaItemsWithMetadata(
         mediaItems: List<MediaItem>,
     ): List<MediaItem> = supervisorScope {
         mediaItems.map { mediaItem ->
             async {
-                val uri = mediaItem.mediaId.toUri()
-                val video = mediaRepository.getVideoByUri(uri = mediaItem.mediaId)
-                val videoState = mediaRepository.getVideoState(uri = mediaItem.mediaId)
-
-                val externalSubs = videoState?.externalSubs ?: emptyList()
-                val localSubs = (videoState?.path ?: getPath(uri))?.let {
-                    File(it).getLocalSubtitles(
-                        context = this@PlayerService,
-                        excludeSubsList = externalSubs,
-                    )
-                } ?: emptyList()
-
-                val existingSubConfigurations = mediaItem.localConfiguration?.subtitleConfigurations ?: emptyList()
-                val subConfigurations = (localSubs + externalSubs).map { subtitleUri ->
-                    uriToSubtitleConfiguration(
-                        uri = subtitleUri,
-                        subtitleEncoding = playerPreferences.subtitleTextEncoding,
-                    )
-                }
-
-                // Use placeholder artwork initially - actual artwork will be loaded in background
-                val artworkUri = getDefaultArtworkUri()
-
-                val title = mediaItem.mediaMetadata.title ?: video?.nameWithExtension ?: getFilenameFromUri(uri)
-                val positionMs = mediaItem.mediaMetadata.positionMs ?: videoState?.position
-                val videoScale = mediaItem.mediaMetadata.videoZoom ?: videoState?.videoScale
-                val playbackSpeed = mediaItem.mediaMetadata.playbackSpeed ?: videoState?.playbackSpeed
-                val audioTrackIndex = mediaItem.mediaMetadata.audioTrackIndex ?: videoState?.audioTrackIndex
-                val subtitleTrackIndex = mediaItem.mediaMetadata.subtitleTrackIndex ?: videoState?.subtitleTrackIndex
-                val subtitleDelay = mediaItem.mediaMetadata.subtitleDelayMilliseconds ?: videoState?.subtitleDelayMilliseconds
-                val subtitleSpeed = mediaItem.mediaMetadata.subtitleSpeed ?: videoState?.subtitleSpeed
-
-                mediaItem.buildUpon().apply {
-                    setSubtitleConfigurations(existingSubConfigurations + subConfigurations)
-                    setMediaMetadata(
-                        MediaMetadata.Builder().apply {
-                            setTitle(title)
-                            setArtworkUri(artworkUri)
-                            setExtras(
-                                positionMs = positionMs,
-                                videoScale = videoScale,
-                                playbackSpeed = playbackSpeed,
-                                audioTrackIndex = audioTrackIndex,
-                                subtitleTrackIndex = subtitleTrackIndex,
-                                subtitleDelayMilliseconds = subtitleDelay,
-                                subtitleSpeed = subtitleSpeed,
-                            )
-                        }.build(),
-                    )
-                }.build()
+                updatedMediaItemWithMetadata(mediaItem)
             }
         }.awaitAll()
     }
