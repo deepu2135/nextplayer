@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Metadata
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.extractor.metadata.id3.ChapterFrame
@@ -48,6 +49,10 @@ class ChaptersState(private val player: Player) {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 chapters = emptyList()
+                extractChapters()
+            }
+
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 extractChapters()
             }
         }

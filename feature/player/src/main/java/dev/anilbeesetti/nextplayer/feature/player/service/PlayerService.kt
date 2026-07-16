@@ -725,6 +725,15 @@ class PlayerService : MediaSessionService() {
         val subtitleDelay = mediaItem.mediaMetadata.subtitleDelayMilliseconds ?: videoState?.subtitleDelayMilliseconds
         val subtitleSpeed = mediaItem.mediaMetadata.subtitleSpeed ?: videoState?.subtitleSpeed
 
+        val path = videoState?.path ?: getPath(uri)
+        val mkvChapters = if (uri.toString().endsWith(".mkv", ignoreCase = true) || (path != null && path.endsWith(".mkv", ignoreCase = true))) {
+            runCatching {
+                contentResolver.openInputStream(uri)?.use { inputStream ->
+                    MkvChaptersParser().parse(inputStream)
+                }
+            }.getOrNull()
+        } else null
+
         return mediaItem.buildUpon().apply {
             setSubtitleConfigurations(existingSubConfigurations + subConfigurations)
             setMediaMetadata(
@@ -740,6 +749,15 @@ class PlayerService : MediaSessionService() {
                         subtitleDelayMilliseconds = subtitleDelay,
                         subtitleSpeed = subtitleSpeed,
                     )
+                    val extras = build().extras ?: Bundle()
+                    val updatedExtras = Bundle(extras).apply {
+                        if (mkvChapters != null && mkvChapters.isNotEmpty()) {
+                            putLongArray("nextplayer_chapter_starts", mkvChapters.map { it.startTimeMs }.toLongArray())
+                            putLongArray("nextplayer_chapter_ends", mkvChapters.map { it.startTimeMs + 1000 }.toLongArray())
+                            putStringArray("nextplayer_chapter_titles", mkvChapters.map { it.title }.toTypedArray())
+                        }
+                    }
+                    setExtras(updatedExtras)
                 }.build(),
             )
         }.build()
@@ -848,3 +866,125 @@ private var Player.playerSpecificSubtitleSpeed: Float
             is ExoPlayer -> this.subtitleSpeed = value
         }
     }
+
+private class MkvChaptersParser {
+    data class RawChapter(
+        val title: String,
+        val startTimeMs: Long
+    )
+
+    fun parse(inputStream: java.io.InputStream): List<RawChapter> {
+        val chapters = mutableListOf<RawChapter>()
+        try {
+            val buffer = ByteArray(10 * 1024 * 1024)
+            var totalRead = 0
+            while (totalRead < buffer.size) {
+                val read = inputStream.read(buffer, totalRead, buffer.size - totalRead)
+                if (read == -1) break
+                totalRead += read
+            }
+            val data = if (totalRead < buffer.size) buffer.copyOfRange(0, totalRead) else buffer
+
+            var pos = 0
+            
+            fun readVint(): Long? {
+                if (pos >= data.size) return null
+                val firstByte = data[pos].toInt() and 0xFF
+                if (firstByte == 0) return null
+                val len = 8 - Integer.numberOfLeadingZeros(firstByte)
+                if (pos + len > data.size) return null
+                var value = (firstByte and (0xFF shr len)).toLong()
+                pos++
+                for (i in 1 until len) {
+                    value = (value shl 8) or (data[pos].toLong() and 0xFF)
+                    pos++
+                }
+                return value
+            }
+
+            fun readVintWithMarker(): Long? {
+                if (pos >= data.size) return null
+                val firstByte = data[pos].toInt() and 0xFF
+                if (firstByte == 0) return null
+                val len = 8 - Integer.numberOfLeadingZeros(firstByte)
+                if (pos + len > data.size) return null
+                var value = 0L
+                for (i in 0 until len) {
+                    value = (value shl 8) or (data[pos].toLong() and 0xFF)
+                    pos++
+                }
+                return value
+            }
+
+            var chaptersPos = -1
+            for (i in 0 until data.size - 1) {
+                if ((data[i].toInt() and 0xFF) == 0x45 && (data[i + 1].toInt() and 0xFF) == 0xB9) {
+                    chaptersPos = i
+                    break
+                }
+            }
+
+            if (chaptersPos != -1) {
+                pos = chaptersPos
+                val chaptersId = readVintWithMarker()
+                if (chaptersId == 0x45B9L) {
+                    val chaptersSize = readVint() ?: return emptyList()
+                    val chaptersEnd = pos + chaptersSize.toInt()
+
+                    while (pos < chaptersEnd && pos < data.size) {
+                        val id = readVintWithMarker() ?: break
+                        val size = readVint() ?: break
+                        val end = pos + size.toInt()
+
+                        if (id == 0x45B9L || id == 0x45BDL) {
+                            // EditionEntry
+                        } else if (id == 0xB6L) {
+                            var startTimeNs = 0L
+                            var title = ""
+                            while (pos < end && pos < data.size) {
+                                val subId = readVintWithMarker() ?: break
+                                val subSize = readVint() ?: break
+                                val subEnd = pos + subSize.toInt()
+
+                                if (subId == 0x91L) {
+                                    var timeVal = 0L
+                                    for (k in 0 until subSize.toInt()) {
+                                        if (pos < data.size) {
+                                            timeVal = (timeVal shl 8) or (data[pos].toLong() and 0xFF)
+                                            pos++
+                                        }
+                                    }
+                                    startTimeNs = timeVal
+                                } else if (subId == 0x80L) {
+                                    while (pos < subEnd && pos < data.size) {
+                                        val dispId = readVintWithMarker() ?: break
+                                        val dispSize = readVint() ?: break
+                                        val dispEnd = pos + dispSize.toInt()
+                                        if (dispId == 0x85L) {
+                                            val copyLen = dispSize.toInt().coerceAtMost(data.size - pos)
+                                            if (copyLen > 0) {
+                                                val strBytes = data.copyOfRange(pos, pos + copyLen)
+                                                title = String(strBytes, Charsets.UTF_8)
+                                            }
+                                            pos += dispSize.toInt()
+                                        } else {
+                                            pos += dispSize.toInt()
+                                        }
+                                    }
+                                } else {
+                                    pos += subSize.toInt()
+                                }
+                            }
+                            chapters.add(RawChapter(title, startTimeNs / 1000000))
+                        } else {
+                            pos += size.toInt()
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return chapters
+    }
+}
