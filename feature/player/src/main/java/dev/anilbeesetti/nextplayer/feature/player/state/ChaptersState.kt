@@ -50,8 +50,9 @@ class ChaptersState(private val player: Player) {
                         for (k in 0 until entry.subFrameCount) {
                             val subFrame = entry.getSubFrame(k)
                             if (subFrame is TextInformationFrame) {
-                                if (subFrame.value != null) {
-                                    title = subFrame.value!!
+                                val value = subFrame.values.firstOrNull()
+                                if (value != null) {
+                                    title = value
                                     break
                                 }
                             }
