@@ -12,6 +12,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Metadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Player.DISCONTINUITY_REASON_AUTO_TRANSITION
@@ -167,6 +168,35 @@ class PlayerService : MediaSessionService() {
                 }
 
                 else -> return
+            }
+        }
+
+        override fun onMetadata(metadata: Metadata) {
+            super.onMetadata(metadata)
+            val newChapters = dev.anilbeesetti.nextplayer.feature.player.state.parseMetadata(metadata)
+            if (newChapters.isNotEmpty()) {
+                val player = mediaSession?.player ?: return
+                val currentItem = player.currentMediaItem ?: return
+                val index = player.currentMediaItemIndex
+                
+                val extras = currentItem.mediaMetadata.extras ?: Bundle()
+                if (!extras.containsKey("nextplayer_chapter_starts")) {
+                    val updatedExtras = Bundle(extras).apply {
+                        putLongArray("nextplayer_chapter_starts", newChapters.map { it.startTimeMs }.toLongArray())
+                        putLongArray("nextplayer_chapter_ends", newChapters.map { it.endTimeMs }.toLongArray())
+                        putStringArray("nextplayer_chapter_titles", newChapters.map { it.title }.toTypedArray())
+                    }
+                    
+                    val updatedMetadata = currentItem.mediaMetadata.buildUpon()
+                        .setExtras(updatedExtras)
+                        .build()
+                    
+                    val updatedItem = currentItem.buildUpon()
+                        .setMediaMetadata(updatedMetadata)
+                        .build()
+                    
+                    player.replaceMediaItem(index, updatedItem)
+                }
             }
         }
 
