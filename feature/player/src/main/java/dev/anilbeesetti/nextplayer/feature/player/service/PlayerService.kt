@@ -952,8 +952,16 @@ private class MkvChaptersParser {
                     var success = true
 
                     while (pos < chaptersEnd && pos < data.size) {
-                        val id = readVintWithMarker() ?: { success = false; break }()
-                        val size = readVint() ?: { success = false; break }()
+                        val id = readVintWithMarker()
+                        if (id == null) {
+                            success = false
+                            break
+                        }
+                        val size = readVint()
+                        if (size == null) {
+                            success = false
+                            break
+                        }
                         if (size < 0 || pos + size > data.size) {
                             success = false
                             break
