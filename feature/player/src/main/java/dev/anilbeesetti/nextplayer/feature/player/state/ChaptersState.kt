@@ -29,7 +29,7 @@ class ChaptersState(private val player: Player) {
     suspend fun observe() {
         extractChapters()
         player.listen { events ->
-            if (events.containsAny(Player.EVENT_STATIC_METADATA_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+            if (events.containsAny(Player.EVENT_TRACKS_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION)) {
                 extractChapters()
             }
         }
@@ -38,28 +38,32 @@ class ChaptersState(private val player: Player) {
     private fun extractChapters() {
         val extractedChapters = mutableListOf<Chapter>()
         
-        val metadataList = player.currentStaticMetadata
-        for (metadata in metadataList) {
-            for (i in 0 until metadata.length()) {
-                val entry = metadata.get(i)
-                if (entry is ChapterFrame) {
-                    var title = "Chapter ${extractedChapters.size + 1}"
-                    for (j in 0 until entry.subFrames.size) {
-                        val subFrame = entry.subFrames[j]
-                        if (subFrame is TextInformationFrame) {
-                            if (subFrame.value != null) {
-                                title = subFrame.value!!
-                                break
+        val tracks = player.currentTracks
+        for (group in tracks.groups) {
+            for (i in 0 until group.length) {
+                val format = group.getTrackFormat(i)
+                val metadata = format.metadata ?: continue
+                for (j in 0 until metadata.length()) {
+                    val entry = metadata.get(j)
+                    if (entry is ChapterFrame) {
+                        var title = "Chapter ${extractedChapters.size + 1}"
+                        for (k in 0 until entry.subFrameCount) {
+                            val subFrame = entry.getSubFrame(k)
+                            if (subFrame is TextInformationFrame) {
+                                if (subFrame.value != null) {
+                                    title = subFrame.value!!
+                                    break
+                                }
                             }
                         }
-                    }
-                    extractedChapters.add(
-                        Chapter(
-                            title = title,
-                            startTimeMs = entry.startTimeMs,
-                            endTimeMs = entry.endTimeMs
+                        extractedChapters.add(
+                            Chapter(
+                                title = title,
+                                startTimeMs = entry.startTimeMs.toLong(),
+                                endTimeMs = entry.endTimeMs.toLong()
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
