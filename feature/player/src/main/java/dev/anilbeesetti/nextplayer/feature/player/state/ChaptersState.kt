@@ -64,6 +64,28 @@ class ChaptersState(private val player: Player) {
                                 endTimeMs = entry.endTimeMs.toLong()
                             )
                         )
+                    } else if (entry.javaClass.simpleName.contains("Chapter", ignoreCase = true)) {
+                        try {
+                            val titleField = runCatching { entry.javaClass.getField("title") }.getOrNull()
+                            val startTimeField = runCatching { entry.javaClass.getField("startTimeMs") }.getOrNull()
+                            val endTimeField = runCatching { entry.javaClass.getField("endTimeMs") }.getOrNull()
+                            
+                            val title = titleField?.get(entry)?.toString() ?: "Chapter ${extractedChapters.size + 1}"
+                            val startTime = (startTimeField?.get(entry) as? Number)?.toLong() ?: 0L
+                            val endTime = (endTimeField?.get(entry) as? Number)?.toLong() ?: 0L
+                            
+                            if (endTime > 0) {
+                                extractedChapters.add(
+                                    Chapter(
+                                        title = title,
+                                        startTimeMs = startTime,
+                                        endTimeMs = endTime
+                                    )
+                                )
+                            }
+                        } catch (e: Exception) {
+                            // Ignore reflection errors for unknown chapter formats
+                        }
                     }
                 }
             }
