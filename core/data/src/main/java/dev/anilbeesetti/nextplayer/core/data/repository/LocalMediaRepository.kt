@@ -190,4 +190,8 @@ class LocalMediaRepository @Inject constructor(
             ),
         )
     }
+
+    override suspend fun deleteWatchHistory(uris: List<String>) {
+        mediumStateDao.delete(uris)
+    }
 }
