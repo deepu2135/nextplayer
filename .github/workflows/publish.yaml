@@ -16,7 +16,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Get updated version name and version code
         run: |
@@ -48,7 +48,17 @@ jobs:
         with:
           validate-wrappers: true
 
+      - name: Check Keystore Secret
+        id: check_keystore
+        run: |
+          if [ -n "${{ secrets.KEYSTORE }}" ]; then
+            echo "has_keystore=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_keystore=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Decode keystore file
+        if: steps.check_keystore.outputs.has_keystore == 'true'
         uses: timheuer/base64-to-file@v2
         id: keystore
         with:
@@ -56,13 +66,15 @@ jobs:
           encodedString: ${{ secrets.KEYSTORE }}
 
       - name: Decode Play API credentials file
+        if: steps.check_keystore.outputs.has_keystore == 'true'
         uses: timheuer/base64-to-file@v2
         id: play_api_credentials
         with:
           fileName: 'play-api-credentials.json'
           encodedString: ${{ secrets.PLAY_API_CREDENTIALS }}
 
-      - name: Build app and publish
+      - name: Build app and publish via Fastlane
+        if: steps.check_keystore.outputs.has_keystore == 'true'
         run: bundle exec fastlane publish
         env:
           TRACK: "internal"
@@ -72,22 +84,31 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           PLAY_API_CREDENTIALS: ${{ steps.play_api_credentials.outputs.filePath }}
 
+      - name: Build app without Keystore (Fallback)
+        if: steps.check_keystore.outputs.has_keystore != 'true'
+        run: ./gradlew assembleReleaseWithDebugSigning
+
       - name: Rename Files
         run: |
-          mv app/build/outputs/apk/release/app-arm64-v8a-release.apk app/build/outputs/apk/release/nextplayer-v${{ env.VERSION_NAME }}-arm64-v8a.apk
-          mv app/build/outputs/apk/release/app-armeabi-v7a-release.apk app/build/outputs/apk/release/nextplayer-v${{ env.VERSION_NAME }}-armeabi-v7a.apk
-          mv app/build/outputs/apk/release/app-universal-release.apk app/build/outputs/apk/release/nextplayer-v${{ env.VERSION_NAME }}-universal.apk
-          mv app/build/outputs/apk/release/app-x86-release.apk app/build/outputs/apk/release/nextplayer-v${{ env.VERSION_NAME }}-x86.apk
-          mv app/build/outputs/apk/release/app-x86_64-release.apk app/build/outputs/apk/release/nextplayer-v${{ env.VERSION_NAME }}-x86_64.apk
+          mkdir -p app/build/outputs/apk/release/
+          if [ -d "app/build/outputs/apk/release-with-debug-signing" ]; then
+            cp app/build/outputs/apk/release-with-debug-signing/*.apk app/build/outputs/apk/release/
+          fi
+          mv app/build/outputs/apk/release/app-arm64-v8a-*.apk app/build/outputs/apk/release/nextplayer-v${{ env.VERSION_NAME }}-arm64-v8a.apk || true
+          mv app/build/outputs/apk/release/app-armeabi-v7a-*.apk app/build/outputs/apk/release/nextplayer-v${{ env.VERSION_NAME }}-armeabi-v7a.apk || true
+          mv app/build/outputs/apk/release/app-universal-*.apk app/build/outputs/apk/release/nextplayer-v${{ env.VERSION_NAME }}-universal.apk || true
+          mv app/build/outputs/apk/release/app-x86-*.apk app/build/outputs/apk/release/nextplayer-v${{ env.VERSION_NAME }}-x86.apk || true
+          mv app/build/outputs/apk/release/app-x86_64-*.apk app/build/outputs/apk/release/nextplayer-v${{ env.VERSION_NAME }}-x86_64.apk || true
 
       - name: Create or Update Release
         id: create_or_update_release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           files: app/build/outputs/apk/release/nextplayer*
           draft: ${{ github.event_name != 'release' }}
           name: v${{ env.VERSION_NAME }}
+          make_latest: true
           generate_release_notes: true
           tag_name: v${{ env.VERSION_NAME }}
