@@ -86,7 +86,8 @@ jobs:
 
       - name: Build app without Keystore (Fallback)
         if: steps.check_keystore.outputs.has_keystore != 'true'
-        run: ./gradlew assembleReleaseWithDebugSigning
+        run: ./gradlew assembleRelease-with-debug-signing
+
 
       - name: Rename Files
         run: |
