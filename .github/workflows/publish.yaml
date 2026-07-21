@@ -108,8 +108,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           files: app/build/outputs/apk/release/nextplayer*
-          draft: ${{ github.event_name != 'release' }}
+          draft: false
           name: v${{ env.VERSION_NAME }}
+
           make_latest: true
           generate_release_notes: true
           tag_name: v${{ env.VERSION_NAME }}

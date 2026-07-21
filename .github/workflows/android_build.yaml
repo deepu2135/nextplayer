@@ -90,6 +90,7 @@ jobs:
           tag_name: nightly
           name: Nightly Build
           prerelease: true
+          draft: false
           make_latest: true
           files: |
             app/build/outputs/apk/debug/nextplayer-universal-debug.apk
@@ -98,5 +99,6 @@ jobs:
             app/build/outputs/apk/debug/nextplayer-x86-debug.apk
             app/build/outputs/apk/debug/nextplayer-x86_64-debug.apk
           body: "Auto-generated nightly build from the latest push to main."
+
 
 
