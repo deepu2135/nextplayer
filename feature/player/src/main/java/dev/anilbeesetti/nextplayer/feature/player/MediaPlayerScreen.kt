@@ -1,7 +1,5 @@
 package dev.anilbeesetti.nextplayer.feature.player
 
-import android.content.Intent
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
@@ -380,13 +378,6 @@ fun MediaPlayerScreen(
                                     onSubtitleClick = {
                                         controlsVisibilityState.hideControls()
                                         overlayView = OverlayView.SUBTITLE_SELECTOR
-                                    },
-                                    onSubtitleLongClick = {
-                                        controlsVisibilityState.hideControls()
-                                        runCatching {
-                                            val intent = Intent(Settings.ACTION_CAPTIONING_SETTINGS)
-                                            context.startActivity(intent)
-                                        }
                                     },
                                     onPlaybackSpeedClick = {
                                         controlsVisibilityState.hideControls()

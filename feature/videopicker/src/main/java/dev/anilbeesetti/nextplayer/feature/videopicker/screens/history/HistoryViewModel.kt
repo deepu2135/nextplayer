@@ -5,12 +5,15 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dev.anilbeesetti.nextplayer.core.domain.GetWatchHistoryUseCase
+import dev.anilbeesetti.nextplayer.core.data.repository.PreferencesRepository
 import dev.anilbeesetti.nextplayer.core.domain.DeleteWatchHistoryUseCase
+import dev.anilbeesetti.nextplayer.core.domain.GetWatchHistoryUseCase
+import dev.anilbeesetti.nextplayer.core.model.ApplicationPreferences
 import dev.anilbeesetti.nextplayer.core.model.Video
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -20,6 +23,7 @@ import javax.inject.Inject
 class HistoryViewModel @Inject constructor(
     private val getWatchHistoryUseCase: GetWatchHistoryUseCase,
     private val deleteWatchHistoryUseCase: DeleteWatchHistoryUseCase,
+    private val preferencesRepository: PreferencesRepository,
 ) : ViewModel() {
 
     private val uiStateInternal = MutableStateFlow(HistoryUiState())
@@ -30,8 +34,13 @@ class HistoryViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            getWatchHistoryUseCase().collect { history ->
-                uiStateInternal.update { it.copy(videos = history) }
+            combine(
+                getWatchHistoryUseCase(),
+                preferencesRepository.applicationPreferences,
+            ) { history, preferences ->
+                HistoryUiState(videos = history, preferences = preferences)
+            }.collect { state ->
+                uiStateInternal.value = state
             }
         }
     }
@@ -59,6 +68,7 @@ class HistoryViewModel @Inject constructor(
 @Stable
 data class HistoryUiState(
     val videos: List<Video> = emptyList(),
+    val preferences: ApplicationPreferences = ApplicationPreferences(),
 )
 
 sealed interface HistoryAction {

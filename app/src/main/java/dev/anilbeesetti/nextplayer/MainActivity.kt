@@ -36,15 +36,15 @@ import dagger.hilt.android.AndroidEntryPoint
 import dev.anilbeesetti.nextplayer.core.common.service.system.SystemService
 import dev.anilbeesetti.nextplayer.core.media.network.proxy.NetworkStreamingProxy
 import dev.anilbeesetti.nextplayer.core.media.services.MediaOperationsService
-import dev.anilbeesetti.nextplayer.core.media.sync.MediaSynchronizer
 import dev.anilbeesetti.nextplayer.core.model.ThemeConfig
 import dev.anilbeesetti.nextplayer.core.ui.theme.NextPlayerTheme
 import dev.anilbeesetti.nextplayer.navigation.NextNavigationBar
 import dev.anilbeesetti.nextplayer.navigation.NextNavigationRail
 import dev.anilbeesetti.nextplayer.navigation.TopLevelDestination
 import dev.anilbeesetti.nextplayer.navigation.isNavigationBetweenTopLevelDestinations
-import dev.anilbeesetti.nextplayer.navigation.mediaNavGraph
 import dev.anilbeesetti.nextplayer.navigation.historyNavGraph
+import dev.anilbeesetti.nextplayer.navigation.mediaNavGraph
+import dev.anilbeesetti.nextplayer.navigation.networkNavGraph
 import dev.anilbeesetti.nextplayer.navigation.rememberResponsiveNavigationSceneDecoratorStrategy
 import dev.anilbeesetti.nextplayer.navigation.rememberTopLevelNavState
 import dev.anilbeesetti.nextplayer.navigation.settingsNavGraph
@@ -53,9 +53,6 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-
-    @Inject
-    lateinit var synchronizer: MediaSynchronizer
 
     @Inject
     lateinit var mediaOperationsService: MediaOperationsService
@@ -78,8 +75,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         systemService.initialize(this@MainActivity)
         mediaOperationsService.initialize(this@MainActivity)
-        synchronizer.startSync()
-
         var uiState: MainActivityUiState by mutableStateOf(MainActivityUiState.Loading)
 
         lifecycleScope.launch {
@@ -134,12 +129,14 @@ class MainActivity : ComponentActivity() {
 
                     val mediaStack = navState.backStacks.getValue(TopLevelDestination.MEDIA.route)
                     val historyStack = navState.backStacks.getValue(TopLevelDestination.HISTORY.route)
+                    val networkStack = navState.backStacks.getValue(TopLevelDestination.NETWORK.route)
 
-                    // Media and network entries navigate within their own tab's stack; settings is
+                    // Media, history, and network entries navigate within their own tab's stack; settings is
                     // shared, so it navigates within whichever tab it was opened from (the current one).
                     val provider = entryProvider {
                         mediaNavGraph(context = this@MainActivity, backStack = mediaStack)
                         historyNavGraph(context = this@MainActivity, backStack = historyStack)
+                        networkNavGraph(context = this@MainActivity, backStack = networkStack)
                         settingsNavGraph(backStack = navState.currentStack)
                     }
 

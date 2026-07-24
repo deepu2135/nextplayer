@@ -20,7 +20,8 @@ android {
     }
 
     ksp {
-        arg("room.schemaLocation", "$projectDir/schemas")
+        // arg("room.schemaLocation", "$projectDir/schemas")
+        arg("room.verifySchema", "false")
     }
 }
 

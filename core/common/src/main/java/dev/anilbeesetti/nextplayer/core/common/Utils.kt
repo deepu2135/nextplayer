@@ -9,8 +9,7 @@ import kotlin.math.abs
 
 val storagePermission = when {
     Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> Manifest.permission.READ_MEDIA_VIDEO
-    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Manifest.permission.READ_EXTERNAL_STORAGE
-    else -> Manifest.permission.WRITE_EXTERNAL_STORAGE
+    else -> Manifest.permission.READ_EXTERNAL_STORAGE
 }
 
 /**
@@ -85,5 +84,15 @@ object Utils {
 
     fun formatLanguage(language: String?): String? {
         return language?.let { lang -> Locale.forLanguageTag(lang).displayLanguage.takeIf { it.isNotEmpty() } }
+    }
+
+    fun isLocalServerUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.startsWith("http://127.0.0.1") ||
+            lower.startsWith("https://127.0.0.1") ||
+            lower.startsWith("http://localhost") ||
+            lower.startsWith("https://localhost") ||
+            lower.contains("127.0.0.1") ||
+            lower.contains("localhost")
     }
 }

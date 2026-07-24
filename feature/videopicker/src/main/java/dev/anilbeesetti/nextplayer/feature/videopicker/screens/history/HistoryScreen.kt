@@ -157,7 +157,7 @@ internal fun HistoryScreen(
                         videos = uiState.videos,
                         folders = emptyList(),
                     ),
-                    preferences = ApplicationPreferences(),
+                    preferences = uiState.preferences,
                     restoredFocusKey = null,
                     selectionManager = selectionManager,
                     onItemFocused = {},

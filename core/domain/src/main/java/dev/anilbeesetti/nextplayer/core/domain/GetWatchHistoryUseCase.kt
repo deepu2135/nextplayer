@@ -1,6 +1,7 @@
 package dev.anilbeesetti.nextplayer.core.domain
 
 import android.net.Uri
+import dev.anilbeesetti.nextplayer.core.common.Utils
 import dev.anilbeesetti.nextplayer.core.data.repository.MediaRepository
 import dev.anilbeesetti.nextplayer.core.database.dao.MediumStateDao
 import dev.anilbeesetti.nextplayer.core.model.Video
@@ -19,7 +20,7 @@ class GetWatchHistoryUseCase @Inject constructor(
             mediaRepository.observeVideos(null)
         ) { states, localVideos ->
             val localVideosMap = localVideos.associateBy { it.uriString }
-            states.filter { it.lastPlayedTime != null }
+            states.filter { it.lastPlayedTime != null && !Utils.isLocalServerUrl(it.uriString) }
                 .sortedByDescending { it.lastPlayedTime }
                 .map { state ->
                     localVideosMap[state.uriString] ?: run {

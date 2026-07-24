@@ -92,7 +92,7 @@ class VolumeState(
         val clampedPercentage = percentage.coerceIn(0, maxPercentage)
         val targetVolume = (clampedPercentage * systemMaxVolume) / MAX_VOLUME_PERCENTAGE_NORMAL
 
-        setVolume(targetVolume, showVolumePanel = false, isGesture = true)
+        setVolume(targetVolume)
     }
 
     fun increaseVolume(showVolumePanel: Boolean = false) {
@@ -150,22 +150,22 @@ class VolumeState(
         }
     }
 
-    private fun setVolume(volume: Int, showVolumePanel: Boolean = false, isGesture: Boolean = false) {
+    private fun setVolume(volume: Int, showVolumePanel: Boolean = false) {
         val clampedVolume = volume.coerceIn(0, maxVolume)
         currentVolume = clampedVolume
         volumePercentage = calculateVolumePercentage()
 
         if (clampedVolume <= systemMaxVolume) {
-            setSystemVolume(clampedVolume, showVolumePanel, isGesture)
+            setSystemVolume(clampedVolume, showVolumePanel)
             applyVolumeBoost(0)
         } else {
-            setSystemVolume(systemMaxVolume, showVolumePanel, isGesture)
+            setSystemVolume(systemMaxVolume, showVolumePanel)
             applyVolumeBoost(clampedVolume - systemMaxVolume)
         }
     }
 
-    private fun setSystemVolume(volume: Int, showVolumePanel: Boolean, isGesture: Boolean) {
-        val shouldShowUi = !isGesture && (showVolumePanel || (showVolumePanelIfHeadsetIsOn && audioManager.isHeadsetOn))
+    private fun setSystemVolume(volume: Int, showVolumePanel: Boolean) {
+        val shouldShowUi = showVolumePanel || (showVolumePanelIfHeadsetIsOn && audioManager.isHeadsetOn)
         audioManager.setStreamVolume(
             AudioManager.STREAM_MUSIC,
             volume.coerceIn(0, systemMaxVolume),

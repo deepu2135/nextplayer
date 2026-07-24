@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -266,6 +267,25 @@ private fun ThumbnailView(
                 contentColor = Color.White,
                 shape = MaterialTheme.shapes.extraSmall,
             )
+        }
+
+        if (video.playedPercentage != null || video.lastPlayedAt != null) {
+            Surface(
+                modifier = Modifier
+                    .padding(5.dp)
+                    .align(Alignment.TopStart),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ) {
+                Icon(
+                    imageVector = NextIcons.Check,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .padding(2.dp)
+                        .size(12.dp),
+                )
+            }
         }
 
         if (preferences.showPlayedProgress && video.playedPercentage != null) {

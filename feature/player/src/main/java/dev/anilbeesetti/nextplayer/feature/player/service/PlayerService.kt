@@ -12,7 +12,6 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
-import androidx.media3.common.Metadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Player.DISCONTINUITY_REASON_AUTO_TRANSITION
@@ -168,35 +167,6 @@ class PlayerService : MediaSessionService() {
                 }
 
                 else -> return
-            }
-        }
-
-        override fun onMetadata(metadata: Metadata) {
-            super.onMetadata(metadata)
-            val newChapters = dev.anilbeesetti.nextplayer.feature.player.state.parseMetadata(metadata)
-            if (newChapters.isNotEmpty()) {
-                val player = mediaSession?.player ?: return
-                val currentItem = player.currentMediaItem ?: return
-                val index = player.currentMediaItemIndex
-                
-                val extras = currentItem.mediaMetadata.extras ?: Bundle()
-                if (!extras.containsKey("nextplayer_chapter_starts")) {
-                    val updatedExtras = Bundle(extras).apply {
-                        putLongArray("nextplayer_chapter_starts", newChapters.map { it.startTimeMs }.toLongArray())
-                        putLongArray("nextplayer_chapter_ends", newChapters.map { it.endTimeMs }.toLongArray())
-                        putStringArray("nextplayer_chapter_titles", newChapters.map { it.title }.toTypedArray())
-                    }
-                    
-                    val updatedMetadata = currentItem.mediaMetadata.buildUpon()
-                        .setExtras(updatedExtras)
-                        .build()
-                    
-                    val updatedItem = currentItem.buildUpon()
-                        .setMediaMetadata(updatedMetadata)
-                        .build()
-                    
-                    player.replaceMediaItem(index, updatedItem)
-                }
             }
         }
 
@@ -395,25 +365,7 @@ class PlayerService : MediaSessionService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = serviceScope.future(Dispatchers.IO) {
-            val updatedMediaItems = mediaItems.toMutableList()
-            if (startIndex in updatedMediaItems.indices) {
-                updatedMediaItems[startIndex] = updatedMediaItemWithMetadata(updatedMediaItems[startIndex])
-            }
-
-            val player = mediaSession.player
-            serviceScope.launch(Dispatchers.IO) {
-                for (i in updatedMediaItems.indices) {
-                    if (i != startIndex) {
-                        val resolvedItem = updatedMediaItemWithMetadata(mediaItems[i])
-                        withContext(Dispatchers.Main) {
-                            if (player.mediaItemCount > i && player.getMediaItemAt(i).mediaId == resolvedItem.mediaId) {
-                                player.replaceMediaItem(i, resolvedItem)
-                            }
-                        }
-                    }
-                }
-            }
-
+            val updatedMediaItems = updatedMediaItemsWithMetadata(mediaItems)
             return@future MediaSession.MediaItemsWithStartPosition(updatedMediaItems, startIndex, startPositionMs)
         }
 
@@ -422,23 +374,8 @@ class PlayerService : MediaSessionService() {
             controller: MediaSession.ControllerInfo,
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> = serviceScope.future(Dispatchers.IO) {
-            val originalItems = mediaItems.toMutableList()
-            val player = mediaSession.player
-            val originalCount = player.mediaItemCount
-
-            serviceScope.launch(Dispatchers.IO) {
-                for (i in originalItems.indices) {
-                    val resolvedItem = updatedMediaItemWithMetadata(originalItems[i])
-                    withContext(Dispatchers.Main) {
-                        val targetIndex = originalCount + i
-                        if (player.mediaItemCount > targetIndex && player.getMediaItemAt(targetIndex).mediaId == resolvedItem.mediaId) {
-                            player.replaceMediaItem(targetIndex, resolvedItem)
-                        }
-                    }
-                }
-            }
-
-            return@future originalItems
+            val updatedMediaItems = updatedMediaItemsWithMetadata(mediaItems)
+            return@future updatedMediaItems.toMutableList()
         }
 
         override fun onCustomCommand(
@@ -690,93 +627,61 @@ class PlayerService : MediaSessionService() {
         serviceScope.cancel()
     }
 
-    private suspend fun updatedMediaItemWithMetadata(
-        mediaItem: MediaItem,
-    ): MediaItem {
-        val uri = mediaItem.mediaId.toUri()
-        val video = mediaRepository.getVideoByUri(uri = mediaItem.mediaId)
-        val videoState = mediaRepository.getVideoState(uri = mediaItem.mediaId)
-
-        val externalSubs = videoState?.externalSubs ?: emptyList()
-        val localSubs = (videoState?.path ?: getPath(uri))?.let {
-            File(it).getLocalSubtitles(
-                context = this@PlayerService,
-                excludeSubsList = externalSubs,
-            )
-        } ?: emptyList()
-
-        val existingSubConfigurations = mediaItem.localConfiguration?.subtitleConfigurations ?: emptyList()
-        val subConfigurations = (localSubs + externalSubs).map { subtitleUri ->
-            uriToSubtitleConfiguration(
-                uri = subtitleUri,
-                subtitleEncoding = playerPreferences.subtitleTextEncoding,
-            )
-        }
-
-        // Use placeholder artwork initially - actual artwork will be loaded in background
-        val artworkUri = getDefaultArtworkUri()
-
-        val title = mediaItem.mediaMetadata.title ?: video?.nameWithExtension ?: getFilenameFromUri(uri)
-        val positionMs = mediaItem.mediaMetadata.positionMs ?: videoState?.position
-        val videoScale = mediaItem.mediaMetadata.videoZoom ?: videoState?.videoScale
-        val playbackSpeed = mediaItem.mediaMetadata.playbackSpeed ?: videoState?.playbackSpeed
-        val audioTrackIndex = mediaItem.mediaMetadata.audioTrackIndex ?: videoState?.audioTrackIndex
-        val subtitleTrackIndex = mediaItem.mediaMetadata.subtitleTrackIndex ?: videoState?.subtitleTrackIndex
-        val subtitleDelay = mediaItem.mediaMetadata.subtitleDelayMilliseconds ?: videoState?.subtitleDelayMilliseconds
-        val subtitleSpeed = mediaItem.mediaMetadata.subtitleSpeed ?: videoState?.subtitleSpeed
-
-        val scheme = uri.scheme
-        val isLocal = scheme == ContentResolver.SCHEME_FILE || scheme == ContentResolver.SCHEME_CONTENT
-        val mkvChapters = if (isLocal) {
-            runCatching {
-                contentResolver.openInputStream(uri)?.use { inputStream ->
-                    MkvChaptersParser().parse(inputStream)
-                }
-            }.getOrNull()
-        } else null
-
-        return mediaItem.buildUpon().apply {
-            setSubtitleConfigurations(existingSubConfigurations + subConfigurations)
-            setMediaMetadata(
-                MediaMetadata.Builder().apply {
-                    setTitle(title)
-                    setArtworkUri(artworkUri)
-                    setExtras(
-                        positionMs = positionMs,
-                        videoScale = videoScale,
-                        playbackSpeed = playbackSpeed,
-                        audioTrackIndex = audioTrackIndex,
-                        subtitleTrackIndex = subtitleTrackIndex,
-                        subtitleDelayMilliseconds = subtitleDelay,
-                        subtitleSpeed = subtitleSpeed,
-                    )
-                    val extras = build().extras ?: Bundle()
-                    val updatedExtras = Bundle(extras).apply {
-                        if (mkvChapters != null && mkvChapters.isNotEmpty()) {
-                            val sortedChapters = mkvChapters.sortedBy { it.startTimeMs }
-                            val starts = sortedChapters.map { it.startTimeMs }.toLongArray()
-                            val ends = LongArray(starts.size)
-                            for (i in 0 until starts.size - 1) {
-                                ends[i] = starts[i + 1]
-                            }
-                            ends[starts.size - 1] = 0L // Will be handled in ChaptersState to use video duration
-                            putLongArray("nextplayer_chapter_starts", starts)
-                            putLongArray("nextplayer_chapter_ends", ends)
-                            putStringArray("nextplayer_chapter_titles", sortedChapters.map { it.title }.toTypedArray())
-                        }
-                    }
-                    setExtras(updatedExtras)
-                }.build(),
-            )
-        }.build()
-    }
-
     private suspend fun updatedMediaItemsWithMetadata(
         mediaItems: List<MediaItem>,
     ): List<MediaItem> = supervisorScope {
         mediaItems.map { mediaItem ->
             async {
-                updatedMediaItemWithMetadata(mediaItem)
+                val uri = mediaItem.mediaId.toUri()
+                val video = mediaRepository.getVideoByUri(uri = mediaItem.mediaId)
+                val videoState = mediaRepository.getVideoState(uri = mediaItem.mediaId)
+
+                val externalSubs = videoState?.externalSubs ?: emptyList()
+                val localSubs = (videoState?.path ?: getPath(uri))?.let {
+                    File(it).getLocalSubtitles(
+                        context = this@PlayerService,
+                        excludeSubsList = externalSubs,
+                    )
+                } ?: emptyList()
+
+                val existingSubConfigurations = mediaItem.localConfiguration?.subtitleConfigurations ?: emptyList()
+                val subConfigurations = (localSubs + externalSubs).map { subtitleUri ->
+                    uriToSubtitleConfiguration(
+                        uri = subtitleUri,
+                        subtitleEncoding = playerPreferences.subtitleTextEncoding,
+                    )
+                }
+
+                // Use placeholder artwork initially - actual artwork will be loaded in background
+                val artworkUri = getDefaultArtworkUri()
+
+                val title = mediaItem.mediaMetadata.title ?: video?.nameWithExtension ?: getFilenameFromUri(uri)
+                val positionMs = mediaItem.mediaMetadata.positionMs ?: videoState?.position
+                val videoScale = mediaItem.mediaMetadata.videoZoom ?: videoState?.videoScale
+                val playbackSpeed = mediaItem.mediaMetadata.playbackSpeed ?: videoState?.playbackSpeed
+                val audioTrackIndex = mediaItem.mediaMetadata.audioTrackIndex ?: videoState?.audioTrackIndex
+                val subtitleTrackIndex = mediaItem.mediaMetadata.subtitleTrackIndex ?: videoState?.subtitleTrackIndex
+                val subtitleDelay = mediaItem.mediaMetadata.subtitleDelayMilliseconds ?: videoState?.subtitleDelayMilliseconds
+                val subtitleSpeed = mediaItem.mediaMetadata.subtitleSpeed ?: videoState?.subtitleSpeed
+
+                mediaItem.buildUpon().apply {
+                    setSubtitleConfigurations(existingSubConfigurations + subConfigurations)
+                    setMediaMetadata(
+                        MediaMetadata.Builder().apply {
+                            setTitle(title)
+                            setArtworkUri(artworkUri)
+                            setExtras(
+                                positionMs = positionMs,
+                                videoScale = videoScale,
+                                playbackSpeed = playbackSpeed,
+                                audioTrackIndex = audioTrackIndex,
+                                subtitleTrackIndex = subtitleTrackIndex,
+                                subtitleDelayMilliseconds = subtitleDelay,
+                                subtitleSpeed = subtitleSpeed,
+                            )
+                        }.build(),
+                    )
+                }.build()
             }
         }.awaitAll()
     }
@@ -874,163 +779,3 @@ private var Player.playerSpecificSubtitleSpeed: Float
             is ExoPlayer -> this.subtitleSpeed = value
         }
     }
-
-private class MkvChaptersParser {
-    data class RawChapter(
-        val title: String,
-        val startTimeMs: Long
-    )
-
-    fun parse(inputStream: java.io.InputStream): List<RawChapter> {
-        val chapters = mutableListOf<RawChapter>()
-        try {
-            val buffer = ByteArray(10 * 1024 * 1024)
-            var totalRead = 0
-            while (totalRead < buffer.size) {
-                val read = inputStream.read(buffer, totalRead, buffer.size - totalRead)
-                if (read == -1) break
-                totalRead += read
-            }
-            val data = if (totalRead < buffer.size) buffer.copyOfRange(0, totalRead) else buffer
-
-            // Verify EBML Header magic bytes: 0x1A 0x45 0xDF 0xA3
-            if (data.size < 4 || 
-                data[0] != 0x1A.toByte() || 
-                data[1] != 0x45.toByte() || 
-                data[2] != 0xDF.toByte() || 
-                data[3] != 0xA3.toByte()) {
-                return emptyList()
-            }
-
-            var pos = 0
-            
-            fun readVint(): Long? {
-                if (pos >= data.size) return null
-                val firstByte = data[pos].toInt() and 0xFF
-                if (firstByte == 0) return null
-                val len = 8 - Integer.numberOfLeadingZeros(firstByte)
-                if (pos + len > data.size) return null
-                var value = (firstByte and (0xFF shr len)).toLong()
-                pos++
-                for (i in 1 until len) {
-                    value = (value shl 8) or (data[pos].toLong() and 0xFF)
-                    pos++
-                }
-                return value
-            }
-
-            fun readVintWithMarker(): Long? {
-                if (pos >= data.size) return null
-                val firstByte = data[pos].toInt() and 0xFF
-                if (firstByte == 0) return null
-                val len = 8 - Integer.numberOfLeadingZeros(firstByte)
-                if (pos + len > data.size) return null
-                var value = 0L
-                for (i in 0 until len) {
-                    value = (value shl 8) or (data[pos].toLong() and 0xFF)
-                    pos++
-                }
-                return value
-            }
-
-            val chaptersIndices = mutableListOf<Int>()
-            for (i in 0 until data.size - 1) {
-                if ((data[i].toInt() and 0xFF) == 0x45 && (data[i + 1].toInt() and 0xFF) == 0xB9) {
-                    chaptersIndices.add(i)
-                }
-            }
-
-            for (startPos in chaptersIndices) {
-                pos = startPos
-                val chaptersId = readVintWithMarker()
-                if (chaptersId == 0x45B9L) {
-                    val chaptersSize = readVint() ?: continue
-                    if (chaptersSize <= 0 || pos + chaptersSize > data.size) continue
-                    val chaptersEnd = pos + chaptersSize.toInt()
-
-                    val parsedChapters = mutableListOf<RawChapter>()
-                    var success = true
-
-                    while (pos < chaptersEnd && pos < data.size) {
-                        val id = readVintWithMarker()
-                        if (id == null) {
-                            success = false
-                            break
-                        }
-                        val size = readVint()
-                        if (size == null) {
-                            success = false
-                            break
-                        }
-                        if (size < 0 || pos + size > data.size) {
-                            success = false
-                            break
-                        }
-                        val end = pos + size.toInt()
-
-                        if (id == 0x45B9L || id == 0x45BDL) {
-                            // EditionEntry
-                        } else if (id == 0xB6L) {
-                            var startTimeNs = -1L
-                            var title = ""
-                            while (pos < end && pos < data.size) {
-                                val subId = readVintWithMarker() ?: break
-                                val subSize = readVint() ?: break
-                                if (subSize < 0 || pos + subSize > data.size) {
-                                    success = false
-                                    break
-                                }
-                                val subEnd = pos + subSize.toInt()
-
-                                if (subId == 0x91L) {
-                                    var timeVal = 0L
-                                    for (k in 0 until subSize.toInt()) {
-                                        if (pos < data.size) {
-                                            timeVal = (timeVal shl 8) or (data[pos].toLong() and 0xFF)
-                                            pos++
-                                        }
-                                    }
-                                    startTimeNs = timeVal
-                                } else if (subId == 0x80L) {
-                                    while (pos < subEnd && pos < data.size) {
-                                        val dispId = readVintWithMarker() ?: break
-                                        val dispSize = readVint() ?: break
-                                        if (dispSize < 0 || pos + dispSize > data.size) {
-                                            success = false
-                                            break
-                                        }
-                                        val dispEnd = pos + dispSize.toInt()
-                                        if (dispId == 0x85L) {
-                                            val copyLen = dispSize.toInt().coerceAtMost(data.size - pos)
-                                            if (copyLen > 0) {
-                                                val strBytes = data.copyOfRange(pos, pos + copyLen)
-                                                title = String(strBytes, Charsets.UTF_8)
-                                            }
-                                            pos += dispSize.toInt()
-                                        } else {
-                                            pos += dispSize.toInt()
-                                        }
-                                    }
-                                } else {
-                                    pos += subSize.toInt()
-                                }
-                            }
-                            if (startTimeNs >= 0) {
-                                parsedChapters.add(RawChapter(title, startTimeNs / 1000000))
-                            }
-                        } else {
-                            pos += size.toInt()
-                        }
-                    }
-                    if (success && parsedChapters.isNotEmpty()) {
-                        chapters.addAll(parsedChapters)
-                        break
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return chapters
-    }
-}

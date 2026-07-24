@@ -46,6 +46,7 @@ import androidx.navigation3.scene.Scene
 import dev.anilbeesetti.nextplayer.core.ui.R
 import dev.anilbeesetti.nextplayer.core.ui.components.tvFocusRing
 import dev.anilbeesetti.nextplayer.core.ui.designsystem.NextIcons
+import dev.anilbeesetti.nextplayer.feature.network.navigation.NetworkRoute
 import dev.anilbeesetti.nextplayer.feature.videopicker.navigation.HistoryRoute
 import dev.anilbeesetti.nextplayer.feature.videopicker.navigation.MediaPickerRoute
 
@@ -60,6 +61,7 @@ enum class TopLevelDestination(
 ) {
     MEDIA(MediaPickerRoute(), NextIcons.Home, R.string.home),
     HISTORY(HistoryRoute, NextIcons.History, R.string.history),
+    NETWORK(NetworkRoute, NextIcons.Network, R.string.network),
 }
 
 @Composable
@@ -67,7 +69,11 @@ fun rememberTopLevelNavState(): TopLevelNavState {
     val destinations = TopLevelDestination.entries
     // Each tab keeps its own back stack; rememberNavBackStack persists it across config change and
     // process death.
-    val backStacks = destinations.associate { dest -> dest.route to rememberNavBackStack(dest.route) }
+    val backStacks = destinations.associate { dest ->
+        val backStack = rememberNavBackStack(dest.route)
+        backStack.ensureRoot(dest.route)
+        dest.route to backStack
+    }
     val selectedIndex = rememberSaveable { mutableIntStateOf(0) }
     return remember(backStacks, selectedIndex) {
         TopLevelNavState(destinations, backStacks, selectedIndex)
