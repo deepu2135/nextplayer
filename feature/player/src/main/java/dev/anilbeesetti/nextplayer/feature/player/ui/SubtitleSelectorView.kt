@@ -30,6 +30,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
 import androidx.compose.ui.composed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
@@ -92,15 +94,33 @@ fun BoxScope.SubtitleSelectorView(
                     onDismiss()
                 },
             )
+            val context = LocalContext.current
             Spacer(modifier = Modifier.size(16.dp))
-            FilledTonalButton(
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = {
-                    onSelectSubtitleClick()
-                    onDismiss()
-                },
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(text = stringResource(R.string.open_subtitle))
+                FilledTonalButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        onSelectSubtitleClick()
+                        onDismiss()
+                    },
+                ) {
+                    Text(text = stringResource(R.string.open_subtitle))
+                }
+                FilledTonalButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        runCatching {
+                            val intent = Intent(android.provider.Settings.ACTION_CAPTIONING_SETTINGS)
+                            context.startActivity(intent)
+                        }
+                        onDismiss()
+                    },
+                ) {
+                    Text(text = stringResource(R.string.subtitle_customization))
+                }
             }
             Spacer(modifier = Modifier.size(16.dp))
             DelayInput(
