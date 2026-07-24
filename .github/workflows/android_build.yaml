@@ -2,7 +2,7 @@ name: Android Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   pull_request:
 concurrency:
   group: build-${{ github.ref }}
@@ -74,7 +74,7 @@ jobs:
           path: app/build/reports
 
       - name: Prepare Release APKs
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name == 'push'
         run: |
           cd app/build/outputs/apk/debug/
           cp app-universal-debug.apk nextplayer-universal-debug.apk
@@ -84,7 +84,7 @@ jobs:
           cp app-x86_64-debug.apk nextplayer-x86_64-debug.apk
 
       - name: Update Nightly Release
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly
